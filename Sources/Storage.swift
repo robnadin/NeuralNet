@@ -8,10 +8,9 @@
 
 import Foundation
 
-
 // Utilities for persisting/retrieving a NeuralNet from disk.
 
-public extension NeuralNet {
+extension NeuralNet: Codable {
     
     // -------------------
     // NOTE: Our storage protocol writes data to JSON file in plaintext,
@@ -19,40 +18,46 @@ public extension NeuralNet {
     // This will allow Swift AI components to be written/read across platforms without compatibility issues.
     // -------------------
     
-    
     // MARK: JSON keys
     
-    static let layerNodeCountsKey = "layerNodeCounts"
-    static let momentumKey = "momentum"
-    static let learningRateKey = "learningRate"
-    static let batchSizeKey = "batchSize"
-    static let hiddenActivationKey = "hiddenActivation"
-    static let outputActivationKey = "outputActivation"
-    static let weightsKey = "weights"
-    
+    enum CodingKeys: String, CodingKey {
+        case layerNodeCounts
+        case momentum
+        case learningRate
+        case batchSize
+        case hiddenActivation
+        case outputActivation
+        case weights
+    }
     
     /// Attempts to initialize a `NeuralNet` from a file stored at the given URL.
     public convenience init(url: URL) throws {
         // Read data
         let data = try Data(contentsOf: url)
-        // Extract top-level object from data
-        let json = try JSONSerialization.jsonObject(with: data, options: [])
-        // Attempt to convert object into an Array
-        guard let array = json as? [String : Any] else {
-            throw Error.initialization("Unable to read JSON data from file.")
-        }
+        let decoded = try JSONDecoder().decode(NeuralNet.self, from: data)
+        
+        // Recreate Structure object
+        let structure = try Structure(nodes: decoded.layerNodeCounts,
+                                      hiddenActivation: decoded.hiddenActivation,
+                                      outputActivation: decoded.outputActivation,
+                                      batchSize: decoded.batchSize,
+                                      learningRate: decoded.learningRate,
+                                      momentum: decoded.momentumFactor)
+        
+        try self.init(structure: structure, weights: decoded.allWeights())
+    }
+    
+    public convenience init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
         
         // Read all required values from JSON
-        guard let layerNodeCounts = array[NeuralNet.layerNodeCountsKey] as? [Int],
-            let lr = array[NeuralNet.learningRateKey] as? Float,
-            let momentum = array[NeuralNet.momentumKey] as? Float,
-            let batchSize = array[NeuralNet.batchSizeKey] as? Int,
-            let hiddenActivationStr = array[NeuralNet.hiddenActivationKey] as? String,
-            let outputActivationStr = array[NeuralNet.outputActivationKey] as? String,
-            let weights = array[NeuralNet.weightsKey] as? [[Float]]
-            else {
-                throw Error.initialization("One or more required NeuralNet properties are missing.")
-        }
+        let layerNodeCounts = try container.decode([Int].self, forKey: .layerNodeCounts)
+        let learningRate = try container.decode(Float.self, forKey: .learningRate)
+        let momentum = try container.decode(Float.self, forKey: .momentum)
+        let batchSize = try container.decode(Int.self, forKey: .batchSize)
+        let hiddenActivationStr = try container.decode(String.self, forKey: .hiddenActivation)
+        let outputActivationStr = try container.decode(String.self, forKey: .outputActivation)
+        let weights = try container.decode([[Float]].self, forKey: .weights)
         
         // Convert hidden activation function to enum
         var hiddenActivation: ActivationFunction.Hidden
@@ -87,32 +92,31 @@ public extension NeuralNet {
         // Recreate Structure object
         let structure = try Structure(nodes: layerNodeCounts,
                                       hiddenActivation: hiddenActivation, outputActivation: outputActivation,
-                                      batchSize: batchSize, learningRate: lr, momentum: momentum)
+                                      batchSize: batchSize, learningRate: learningRate, momentum: momentum)
         
         // Initialize neural network
         try self.init(structure: structure, weights: weights)
     }
     
-    
     /// Persists the `NeuralNet` to a file at the given URL.
     public func save(to url: URL) throws {
-        // Create top-level JSON object
-        let json: [String : Any] = [
-            NeuralNet.layerNodeCountsKey : layerNodeCounts,
-            NeuralNet.momentumKey : momentumFactor,
-            NeuralNet.learningRateKey : learningRate,
-            NeuralNet.batchSizeKey : batchSize,
-            NeuralNet.hiddenActivationKey : hiddenActivation.stringValue(),
-            NeuralNet.outputActivationKey : outputActivation.stringValue(),
-            NeuralNet.weightsKey : allWeights()
-        ]
-        
         // Serialize array into JSON data
-        let data = try JSONSerialization.data(withJSONObject: json, options: [])
+        let data = try JSONEncoder().encode(self)
         
         // Write data to file
         try data.write(to: url)
     }
     
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        
+        try container.encode(layerNodeCounts, forKey: .layerNodeCounts)
+        try container.encode(momentumFactor, forKey: .momentum)
+        try container.encode(learningRate, forKey: .learningRate)
+        try container.encode(batchSize, forKey: .batchSize)
+        try container.encode(hiddenActivation.stringValue(), forKey: .hiddenActivation)
+        try container.encode(outputActivation.stringValue(), forKey: .outputActivation)
+        try container.encode(allWeights(), forKey: .weights)
+    }
+    
 }
-
